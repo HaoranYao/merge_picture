@@ -4,7 +4,11 @@
 //
 // Reads every .jpg / .jpeg / .png file in <input_dir>, sorts them in natural
 // order (so 2.jpg < 10.jpg), and writes a stitched `merge.jpg` into the
-// current working directory.
+// same directory as the input images.
+//
+// If <input_dir> contains subdirectories, each subdirectory is processed
+// independently in natural order. The top-level directory is also processed
+// if it contains image files directly.
 
 #include <algorithm>
 #include <cctype>
@@ -71,114 +75,106 @@ int usage() {
     std::fprintf(stderr, "Usage: picmerge <input_dir>\n");
     std::fprintf(stderr,
                  "  Reads all .jpg/.jpeg/.png files in <input_dir>, sorts\n"
-                 "  them in natural order, and writes merge.jpg to the\n"
-                 "  current directory.\n");
+                 "  them in natural order, and writes merge.jpg alongside\n"
+                 "  the input images. If <input_dir> contains subdirectories,\n"
+                 "  each subdirectory is merged independently.\n");
     return 1;
 }
 
-} // namespace
-
-int main(int argc, char** argv) {
+// Merge all images in `dir` into `dir/merge.jpg`.
+// Returns true on success, false on any error (message already printed).
+bool merge_directory(const fs::path& dir) {
     using namespace picmerge;
 
-    if (argc != 2) return usage();
+    const std::string dir_str  = dir.string();
+    const std::string out_path = (dir / kOutputName).string();
 
-    const std::string input_dir = argv[1];
-    std::error_code ec;
-    if (!fs::is_directory(input_dir, ec)) {
-        std::fprintf(stderr, "[error] not a directory: %s\n", input_dir.c_str());
-        return 2;
-    }
-
-    // ---- 1. Enumerate + natural sort -------------------------------------
+    // ---- 1. Enumerate + natural sort ----------------------------------------
     std::vector<std::string> paths;
-    for (const auto& entry : fs::directory_iterator(input_dir, ec)) {
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(dir, ec)) {
         if (ec) {
-            std::fprintf(stderr, "[error] directory iteration failed: %s\n",
-                         ec.message().c_str());
-            return 2;
+            std::fprintf(stderr, "[error] directory iteration failed in %s: %s\n",
+                         dir_str.c_str(), ec.message().c_str());
+            return false;
         }
         if (!entry.is_regular_file()) continue;
         if (!has_image_extension(entry.path())) continue;
+        // Skip the output file if it already exists in this directory.
+        std::error_code eq_ec;
+        if (fs::equivalent(entry.path(), fs::path(out_path), eq_ec) && !eq_ec) continue;
         paths.push_back(entry.path().string());
     }
-    if (paths.empty()) {
-        std::fprintf(stderr, "[error] no image files found in %s\n",
-                     input_dir.c_str());
-        return 2;
-    }
+    if (paths.empty()) return true;  // nothing to do — not an error
+
     std::sort(paths.begin(), paths.end(),
               [](const std::string& a, const std::string& b) {
                   return natural_less(fs::path(a).filename().string(),
                                       fs::path(b).filename().string());
               });
 
-    std::fprintf(stdout, "[info] %zu input image(s):\n", paths.size());
-    for (const auto& p : paths) {
+    std::fprintf(stdout, "\n[dir] %s — %zu image(s)\n", dir_str.c_str(), paths.size());
+    for (const auto& p : paths)
         std::fprintf(stdout, "         %s\n", p.c_str());
-    }
 
-    // ---- 2. Probe metadata; fail fast on dimension mismatch ---------------
+    // ---- 2. Probe metadata; fail fast on dimension mismatch -----------------
     int ref_w = 0, ref_h = 0;
     if (!probe_image(paths[0], ref_w, ref_h) || ref_w <= 0 || ref_h <= 0) {
         std::fprintf(stderr, "[error] cannot read image metadata: %s\n",
                      paths[0].c_str());
-        return 2;
+        return false;
     }
     for (size_t i = 1; i < paths.size(); ++i) {
         int w = 0, h = 0;
         if (!probe_image(paths[i], w, h)) {
             std::fprintf(stderr, "[error] cannot read image metadata: %s\n",
                          paths[i].c_str());
-            return 2;
+            return false;
         }
         if (w != ref_w || h != ref_h) {
             std::fprintf(stderr,
                          "[error] dimension mismatch: %s is %dx%d, expected %dx%d\n",
                          paths[i].c_str(), w, h, ref_w, ref_h);
-            return 2;
+            return false;
         }
     }
     std::fprintf(stdout, "[info] all images are %dx%d\n", ref_w, ref_h);
 
-    // ---- Trivial case: single image --------------------------------------
+    // ---- Trivial case: single image -----------------------------------------
     if (paths.size() == 1) {
         Image img;
         if (!img.load(paths[0])) {
             std::fprintf(stderr, "[error] failed to decode %s\n", paths[0].c_str());
-            return 2;
+            return false;
         }
-        if (!write_jpeg(kOutputName, img.width(), img.height(), img.data(), kJpegQuality)) {
-            return 2;
-        }
+        if (!write_jpeg(out_path, img.width(), img.height(), img.data(), kJpegQuality))
+            return false;
         std::fprintf(stdout, "[info] wrote %s (%dx%d, single image)\n",
-                     kOutputName, img.width(), img.height());
-        return 0;
+                     out_path.c_str(), img.width(), img.height());
+        return true;
     }
 
-    // ---- 3. Compute row signatures for every image -----------------------
+    // ---- 3. Compute row signatures for every image --------------------------
     std::vector<RowSignatures> sigs(paths.size());
     for (size_t i = 0; i < paths.size(); ++i) {
         Image img;
         if (!img.load(paths[i])) {
             std::fprintf(stderr, "[error] failed to decode %s\n", paths[i].c_str());
-            return 2;
+            return false;
         }
         sigs[i] = compute_row_signatures(img);
-        // `img` goes out of scope → pixels freed. We only keep the (tiny)
-        // signature vector alive for planning.
     }
 
-    // ---- 4. Detect fixed top / bottom bars --------------------------------
+    // ---- 4. Detect fixed top / bottom bars ----------------------------------
     const FixedBars bars = detect_fixed_bars(sigs);
     std::fprintf(stdout, "[info] fixed top bar = %d rows, bottom bar = %d rows\n",
                  bars.top_height, bars.bottom_height);
 
     const int usable_end = ref_h - bars.bottom_height;
 
-    // ---- 5. Per-pair sticky header detection -----------------------------
-    // sticky_pair[k] for k in [1, N-1]: sticky height between img[k-1] and img[k]
-    const int max_sticky = static_cast<int>((ref_h - bars.top_height - bars.bottom_height) * 0.40);
+    // ---- 5. Per-pair sticky header detection --------------------------------
+    const int max_sticky =
+        static_cast<int>((ref_h - bars.top_height - bars.bottom_height) * 0.40);
     std::vector<int> sticky_pair(paths.size(), 0);
     for (size_t k = 1; k < paths.size(); ++k) {
         sticky_pair[k] = detect_sticky_header(sigs[k - 1], sigs[k],
@@ -186,24 +182,20 @@ int main(int argc, char** argv) {
                                               max_sticky);
     }
 
-    // Per-image self sticky height: an image's sticky header is visible to
-    // its neighbours as "identical rows at same Y". Take the max over both
-    // neighbour pairs to catch the first-appearance case.
     std::vector<int> self_sticky(paths.size(), 0);
     for (size_t k = 0; k < paths.size(); ++k) {
         int s = 0;
-        if (k >= 1)                   s = std::max(s, sticky_pair[k]);
-        if (k + 1 < paths.size())     s = std::max(s, sticky_pair[k + 1]);
+        if (k >= 1)               s = std::max(s, sticky_pair[k]);
+        if (k + 1 < paths.size()) s = std::max(s, sticky_pair[k + 1]);
         self_sticky[k] = s;
     }
     for (size_t k = 0; k < paths.size(); ++k) {
-        if (self_sticky[k] > 0) {
+        if (self_sticky[k] > 0)
             std::fprintf(stdout, "[info] img[%zu] self sticky header = %d rows\n",
                          k, self_sticky[k]);
-        }
     }
 
-    // ---- 6. Per-pair overlap detection -----------------------------------
+    // ---- 6. Per-pair overlap detection --------------------------------------
     std::vector<OverlapResult> overlaps(paths.size() - 1);
     for (size_t k = 0; k + 1 < paths.size(); ++k) {
         const int prev_sticky = self_sticky[k];
@@ -232,11 +224,10 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Signatures no longer needed.
     sigs.clear();
     sigs.shrink_to_fit();
 
-    // ---- 7. Plan and execute the stitch ----------------------------------
+    // ---- 7. Plan and execute the stitch -------------------------------------
     const StitchPlan plan = plan_stitch(ref_w, ref_h,
                                         static_cast<int>(paths.size()),
                                         bars.top_height, bars.bottom_height,
@@ -244,10 +235,70 @@ int main(int argc, char** argv) {
     std::fprintf(stdout, "[info] output dimensions: %dx%d, %zu span(s)\n",
                  plan.width, plan.height, plan.parts.size());
 
-    if (!execute_stitch(plan, paths, kOutputName, kJpegQuality)) {
+    if (!execute_stitch(plan, paths, out_path, kJpegQuality))
+        return false;
+
+    std::fprintf(stdout, "[info] wrote %s (%dx%d)\n",
+                 out_path.c_str(), plan.width, plan.height);
+    return true;
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    if (argc != 2) return usage();
+
+    const fs::path root = argv[1];
+    std::error_code ec;
+    if (!fs::is_directory(root, ec)) {
+        std::fprintf(stderr, "[error] not a directory: %s\n", argv[1]);
         return 2;
     }
-    std::fprintf(stdout, "[info] wrote %s (%dx%d)\n",
-                 kOutputName, plan.width, plan.height);
-    return 0;
+
+    // Collect immediate subdirectories (natural sorted) and check whether the
+    // root itself contains any image files.
+    std::vector<fs::path> subdirs;
+    bool root_has_images = false;
+    const fs::path out_root = root / kOutputName;
+
+    for (const auto& entry : fs::directory_iterator(root, ec)) {
+        if (ec) {
+            std::fprintf(stderr, "[error] directory iteration failed: %s\n",
+                         ec.message().c_str());
+            return 2;
+        }
+        if (entry.is_directory()) {
+            subdirs.push_back(entry.path());
+        } else if (entry.is_regular_file() && has_image_extension(entry.path())) {
+            std::error_code eq_ec;
+            if (!fs::equivalent(entry.path(), out_root, eq_ec) || eq_ec)
+                root_has_images = true;
+        }
+    }
+
+    // Sort subdirectories in natural order by directory name.
+    std::sort(subdirs.begin(), subdirs.end(),
+              [](const fs::path& a, const fs::path& b) {
+                  return natural_less(a.filename().string(), b.filename().string());
+              });
+
+    // Build the list of directories to process.
+    // Root comes first if it has images directly; subdirs follow.
+    std::vector<fs::path> targets;
+    if (root_has_images) targets.push_back(root);
+    for (const auto& d : subdirs) targets.push_back(d);
+
+    if (targets.empty()) {
+        std::fprintf(stderr,
+                     "[error] no image files found in %s or its subdirectories\n",
+                     argv[1]);
+        return 2;
+    }
+
+    int exit_code = 0;
+    for (const auto& dir : targets) {
+        if (!merge_directory(dir))
+            exit_code = 2;
+    }
+    return exit_code;
 }
