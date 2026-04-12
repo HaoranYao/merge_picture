@@ -7,20 +7,24 @@
 namespace picmerge {
 
 namespace {
-// Tolerance per fingerprint byte. Each bin is a mean over ~100 bytes, so
-// real sticky UI elements average out to very close values across JPEG
-// recompressions — but the red "88VIP" promo banner and the nav bar
-// contain small anti-aliased glyphs whose per-bin mean can still wobble by
-// 5-8 counts across separately-compressed screenshots. 8 is empirically
-// sufficient for those, while the jump to unrelated scroll content is
-// much larger (typically >50 per byte), so we're nowhere near false
-// positives.
-constexpr int kBarTol = 8;
+// Per-row L1 sum threshold for bar detection.
+//
+// We use the total L1 distance across all kSigBins fingerprint bytes rather
+// than a strict per-bin maximum. This is more robust to JPEG recompression
+// artifacts in fixed UI elements that contain anti-aliased text (e.g. the
+// "已选: Pocket 3标准版" selection row in JD, or the "88VIP" promo banner in
+// Taobao): one or two bins may wobble by 10–15 counts while the rest are
+// near-zero, but the row is still visually identical across screenshots.
+//
+// Genuine scroll-content transitions show diffs of 50+ per bin across
+// many bins (total L1 >> 500), so a threshold of 200 leaves a 2.5× safety
+// margin against false positives while comfortably absorbing JPEG noise.
+constexpr int kBarL1Thresh = 200;  // sum of |a[k]-b[k]| across 16 bins
 
 bool row_matches_all(const std::vector<RowSignatures>& sigs, int y) {
     const uint8_t* ref = sigs[0].row(y);
     for (size_t i = 1; i < sigs.size(); ++i) {
-        if (!rows_match(ref, sigs[i].row(y), kBarTol)) return false;
+        if (row_l1(ref, sigs[i].row(y)) > kBarL1Thresh) return false;
     }
     return true;
 }
