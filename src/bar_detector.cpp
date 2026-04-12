@@ -20,9 +20,11 @@ namespace {
 // near-zero, but the row is still visually identical across screenshots.
 //
 // Genuine scroll-content transitions show diffs of 50+ per bin across
-// many bins (total L1 >> 500), so a threshold of 200 leaves a 2.5× safety
-// margin against false positives while comfortably absorbing JPEG noise.
-constexpr int kBarL1Thresh = 200;  // sum of |a[k]-b[k]| across 16 bins
+// many bins (total L1 >> 500), so a threshold of 300 leaves a comfortable
+// safety margin against false positives while absorbing both JPEG noise
+// and gradient-background rendering differences (e.g. PDD's red gradient
+// action bar produces pairwise L1 of 200-400 across screenshots).
+constexpr int kBarL1Thresh = 300;  // sum of |a[k]-b[k]| across 16 bins
 
 // Check whether row `y` qualifies as a fixed-bar row using majority voting.
 //
