@@ -167,8 +167,11 @@ bool merge_directory(const fs::path& dir) {
 
     // ---- 4. Detect fixed top / bottom bars ----------------------------------
     const FixedBars bars = detect_fixed_bars(sigs);
-    std::fprintf(stdout, "[info] fixed top bar = %d rows, bottom bar = %d rows\n",
+    std::fprintf(stdout, "[info] fixed top bar = %d rows, bottom bar = %d rows",
                  bars.top_height, bars.bottom_height);
+    if (bars.bot_ref != 0)
+        std::fprintf(stdout, " (bar ref = img[%d])", bars.bot_ref);
+    std::fprintf(stdout, "\n");
 
     const int usable_end = ref_h - bars.bottom_height;
 
@@ -228,9 +231,15 @@ bool merge_directory(const fs::path& dir) {
     sigs.shrink_to_fit();
 
     // ---- 7. Plan and execute the stitch -------------------------------------
+    // Pick the bar reference: for the bottom bar, use bot_ref. For the top
+    // bar, use top_ref. When they differ, prefer bot_ref (bottom bar is
+    // typically larger and more visually prominent). The bar_ref_image is
+    // used for BOTH top and bottom bar contributions in the output.
+    const int bar_ref = (bars.bottom_height > 0) ? bars.bot_ref : bars.top_ref;
     const StitchPlan plan = plan_stitch(ref_w, ref_h,
                                         static_cast<int>(paths.size()),
                                         bars.top_height, bars.bottom_height,
+                                        bar_ref,
                                         self_sticky, overlaps);
     std::fprintf(stdout, "[info] output dimensions: %dx%d, %zu span(s)\n",
                  plan.width, plan.height, plan.parts.size());

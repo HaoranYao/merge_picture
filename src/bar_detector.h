@@ -17,6 +17,8 @@ namespace picmerge {
 struct FixedBars {
     int top_height    = 0;  // rows [0, top_height)           are the shared top bar
     int bottom_height = 0;  // rows [H - bottom_height, H)    are the shared bottom bar
+    int top_ref = 0;        // image whose top bar rows should be used in the output
+    int bot_ref = 0;        // image whose bottom bar rows should be used in the output
 };
 
 // `sigs` must be non-empty, and every element must have the same `.height`.

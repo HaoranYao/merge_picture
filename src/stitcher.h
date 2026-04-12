@@ -39,11 +39,15 @@ struct StitchPlan {
 // coordinate system (already merged from the pairwise detection).
 // `overlaps[i]` is the overlap result for pair (i, i+1); only i in
 // [0, N-2] is populated.
+// `bar_ref_image` is the image index whose bar rows should be used for
+// the single top/bottom bar contribution in the output. Normally 0, but
+// may differ when some images have temporary overlays on the bar area.
 StitchPlan plan_stitch(int width,
                        int image_height,
                        int num_images,
                        int top_bar,
                        int bottom_bar,
+                       int bar_ref_image,
                        const std::vector<int>& self_sticky,
                        const std::vector<OverlapResult>& overlaps);
 

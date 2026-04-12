@@ -37,6 +37,7 @@ StitchPlan plan_stitch(int width,
                        int num_images,
                        int top_bar,
                        int bottom_bar,
+                       int bar_ref_image,
                        const std::vector<int>& self_sticky,
                        const std::vector<OverlapResult>& overlaps) {
     StitchPlan plan;
@@ -48,10 +49,15 @@ StitchPlan plan_stitch(int width,
 
     const int usable_end = image_height - bottom_bar;  // exclusive
 
-    // img[0] contributes everything except its bottom bar — this naturally
-    // includes the shared OS top bar (once) and, if img[0] already has one,
-    // its sticky header too.
-    push_span(plan.parts, /*image_index=*/0, /*y_begin=*/0, /*y_end=*/usable_end);
+    // Top bar comes from the bar-reference image (the one most
+    // representative of the majority). Content from img[0] starts right
+    // after it.
+    if (top_bar > 0 && bar_ref_image != 0)
+        push_span(plan.parts, bar_ref_image, 0, top_bar);
+
+    // img[0] contributes everything except the bottom bar (and the top bar
+    // if it was already emitted from the bar-reference image above).
+    push_span(plan.parts, 0, (top_bar > 0 && bar_ref_image != 0) ? top_bar : 0, usable_end);
 
     for (int i = 1; i < num_images; ++i) {
         const OverlapResult& ov = overlaps[static_cast<size_t>(i - 1)];
@@ -94,8 +100,8 @@ StitchPlan plan_stitch(int width,
         push_span(plan.parts, i, content_begin, usable_end);
     }
 
-    // Bottom bar once, from img[0].
-    push_span(plan.parts, 0, usable_end, image_height);
+    // Bottom bar once, from the bar-reference image.
+    push_span(plan.parts, bar_ref_image, usable_end, image_height);
 
     // Compute total height.
     int total = 0;
