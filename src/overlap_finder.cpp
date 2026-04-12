@@ -130,4 +130,55 @@ OverlapResult find_overlap(const RowSignatures& prev,
     return best;
 }
 
+void refine_overlap_seam(const RowSignatures& prev,
+                         const RowSignatures& next,
+                         OverlapResult& result,
+                         int usable_end) {
+    // Default: seam at the end of overlap = standard prefer-previous.
+    result.seam_in_prev = usable_end;
+    if (!result.ok) return;
+
+    const int ov_begin = result.offset_in_prev;
+    const int ov_end   = usable_end;
+    const int ov_height = ov_end - ov_begin;
+    if (ov_height < 20) return;   // overlap too small to bother
+
+    // Per-row L1 above this ⇒ floating UI element in one of the images.
+    constexpr int kDirtyL1 = 150;
+
+    // Check the bottom few rows.  If they're clean, there's no dirty tail
+    // and we keep the default seam.
+    int dirty_in_bottom = 0;
+    const int check = std::min(8, ov_height);
+    for (int y = ov_end - 1; y >= ov_end - check; --y) {
+        int ny = result.template_start_in_next + (y - ov_begin);
+        if (row_l1(prev.row(y), next.row(ny)) > kDirtyL1)
+            ++dirty_in_bottom;
+    }
+    if (dirty_in_bottom < check / 2) return;   // bottom is mostly clean
+
+    // Bottom has a dirty tail (floating element in prev's lower rows).
+    // Scan upward to find where the clean zone begins.  Require a run of
+    // kMinClean consecutive clean rows to be robust against noise.
+    constexpr int kMinClean = 3;
+    int clean_run = 0;
+
+    for (int y = ov_end - 1; y >= ov_begin; --y) {
+        int ny = result.template_start_in_next + (y - ov_begin);
+        int l1 = row_l1(prev.row(y), next.row(ny));
+
+        if (l1 <= kDirtyL1) {
+            ++clean_run;
+            if (clean_run >= kMinClean) {
+                // Place seam right after this stable clean zone.
+                result.seam_in_prev = y + clean_run;
+                return;
+            }
+        } else {
+            clean_run = 0;
+        }
+    }
+    // Entire overlap is dirty — keep default (don't break the output).
+}
+
 } // namespace picmerge

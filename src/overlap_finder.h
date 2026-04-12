@@ -18,6 +18,7 @@ struct OverlapResult {
     int   offset_in_prev = 0;            // row in `prev` where `next`'s template starts
     int   template_start_in_next = 0;    // = top_bar + max(self_sticky[N], self_sticky[N+1])
     int   template_length = 0;
+    int   seam_in_prev = 0;              // optimal seam within overlap (default = usable_end)
     // Diagnostics
     double best_cost = 0.0;
     double second_best_cost = 0.0;
@@ -45,5 +46,24 @@ OverlapResult find_overlap(const RowSignatures& prev,
                            int prev_usable_end,
                            int next_min_template_start,
                            int next_usable_end);
+
+// Refine the seam position within an already-detected overlap.
+//
+// By default, the stitcher uses the previous image's pixels for the entire
+// overlap region (prefer-previous).  This works well unless there is a
+// floating UI element (promo banner, "快要抢光" badge, etc.) near the
+// bottom of the previous image — those pixels are "dirty".  The same page
+// content appears near the top of the next image, where no floating element
+// covers it.
+//
+// This function scans the bottom of the overlap.  If the two images disagree
+// there (high per-row L1 — a sign of a floating overlay in one of them), it
+// moves `result.seam_in_prev` upward so that the dirty tail is provided by
+// the next image instead.  When the bottom is clean, the seam stays at
+// `usable_end` and the behaviour is identical to the original code.
+void refine_overlap_seam(const RowSignatures& prev,
+                         const RowSignatures& next,
+                         OverlapResult& result,
+                         int usable_end);
 
 } // namespace picmerge

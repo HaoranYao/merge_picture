@@ -212,12 +212,17 @@ bool merge_directory(const fs::path& dir) {
                                    next_template_start, usable_end);
 
         if (overlaps[k].ok) {
+            refine_overlap_seam(sigs[k], sigs[k + 1], overlaps[k], usable_end);
             const int overlap_h = usable_end - overlaps[k].offset_in_prev;
+            const int seam_trim = usable_end - overlaps[k].seam_in_prev;
             std::fprintf(stdout,
                          "[info] pair %zu->%zu: overlap=%d rows, "
-                         "offset_in_prev=%d, cost=%.0f (runner-up=%.0f)\n",
+                         "offset_in_prev=%d, cost=%.0f (runner-up=%.0f)",
                          k, k + 1, overlap_h, overlaps[k].offset_in_prev,
                          overlaps[k].best_cost, overlaps[k].second_best_cost);
+            if (seam_trim > 0)
+                std::fprintf(stdout, ", seam_trim=%d", seam_trim);
+            std::fprintf(stdout, "\n");
         } else {
             std::fprintf(stderr,
                          "[warn] overlap detection failed between img[%zu] "

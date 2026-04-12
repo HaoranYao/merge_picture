@@ -49,55 +49,74 @@ StitchPlan plan_stitch(int width,
 
     const int usable_end = image_height - bottom_bar;  // exclusive
 
-    // Top bar comes from the bar-reference image (the one most
-    // representative of the majority). Content from img[0] starts right
-    // after it.
+    // Overlap-seam policy: prefer-previous with dirty-tail trimming.
+    //
+    // By default each image contributes all the way to usable_end (the
+    // standard prefer-previous behaviour).  However, floating UI elements
+    // (promo banners, "快要抢光" badges, live-stream overlays) sit at
+    // fixed SCREEN positions near the bottom, corrupting the tail of the
+    // overlap region in the previous image.
+    //
+    // refine_overlap_seam() detects this by comparing the two images'
+    // signatures within the overlap: a dirty tail (high per-row L1 at the
+    // bottom) is trimmed from img[i] and supplied by img[i+1] instead.
+    // When the overlap tail is clean, seam_in_prev == usable_end and the
+    // behaviour is identical to the original code.
+
+    // Top bar comes from the bar-reference image.
     if (top_bar > 0 && bar_ref_image != 0)
         push_span(plan.parts, bar_ref_image, 0, top_bar);
 
-    // img[0] contributes everything except the bottom bar (and the top bar
-    // if it was already emitted from the bar-reference image above).
-    push_span(plan.parts, 0, (top_bar > 0 && bar_ref_image != 0) ? top_bar : 0, usable_end);
-
-    for (int i = 1; i < num_images; ++i) {
-        const OverlapResult& ov = overlaps[static_cast<size_t>(i - 1)];
-
-        // Sticky-header injection: if image i is the first in the sequence
-        // where a sticky header appears (self_sticky[i] > self_sticky[i-1]),
-        // emit img[i]'s sticky header rows once.
-        //
-        // Guard: we only inject when `top_bar > 0`, i.e. when we have a
-        // reliable OS-status-bar boundary. Without that boundary, "sticky
-        // header rows" detected from y=0 will include themed status bars,
-        // and injecting them paints a second "20:46" into the middle of
-        // the output. When `top_bar == 0`, the safer choice is to skip
-        // injection entirely — subsequent images' top regions are then
-        // never emitted, so no ghost status bar can leak in.
-        const int prev_sticky = self_sticky[static_cast<size_t>(i - 1)];
-        const int curr_sticky = self_sticky[static_cast<size_t>(i)];
-        if (top_bar > 0 && curr_sticky > prev_sticky) {
-            push_span(plan.parts, i,
-                      top_bar + prev_sticky,
-                      top_bar + curr_sticky);
-        }
-
+    for (int i = 0; i < num_images; ++i) {
+        // ---- Content start ----
         int content_begin;
-        if (ov.ok) {
-            // Rows [template_start_in_next .. template_start_in_next + overlap_height)
-            // of img[i] are already covered by img[i-1]'s contribution.
-            const int overlap_height = usable_end - ov.offset_in_prev;
-            content_begin = ov.template_start_in_next + overlap_height;
+        if (i == 0) {
+            content_begin = (top_bar > 0 && bar_ref_image != 0) ? top_bar : 0;
         } else {
-            // Degraded path: no reliable overlap → concatenate starting
-            // right below the top bar + sticky-shared region.
-            content_begin = top_bar + std::max(curr_sticky, prev_sticky);
+            const OverlapResult& prev_ov = overlaps[static_cast<size_t>(i - 1)];
+
+            // Sticky-header injection: if image i is the first in the
+            // sequence where a sticky header appears, emit img[i]'s new
+            // sticky header rows once.
+            //
+            // Guard: only inject when `top_bar > 0` to avoid painting a
+            // ghost status bar into the middle of the output.
+            const int prev_sticky = self_sticky[static_cast<size_t>(i - 1)];
+            const int curr_sticky = self_sticky[static_cast<size_t>(i)];
+            if (top_bar > 0 && curr_sticky > prev_sticky) {
+                push_span(plan.parts, i,
+                          top_bar + prev_sticky,
+                          top_bar + curr_sticky);
+            }
+
+            if (prev_ov.ok) {
+                // Start from the seam position within the overlap.
+                // When seam == usable_end (no dirty tail), this equals
+                // template_start + overlap_height — identical to the
+                // original prefer-previous behaviour.
+                const int seam_offset = prev_ov.seam_in_prev - prev_ov.offset_in_prev;
+                content_begin = prev_ov.template_start_in_next + seam_offset;
+            } else {
+                content_begin = top_bar + std::max(curr_sticky, prev_sticky);
+            }
+
+            // Clamp: never go backwards and never exceed usable_end.
+            if (content_begin < top_bar + curr_sticky) content_begin = top_bar + curr_sticky;
+            if (content_begin > usable_end)            content_begin = usable_end;
         }
 
-        // Clamp: never go backwards and never exceed usable_end.
-        if (content_begin < top_bar + curr_sticky) content_begin = top_bar + curr_sticky;
-        if (content_begin > usable_end)            content_begin = usable_end;
+        // ---- Content end ----
+        int content_end;
+        if (i < num_images - 1 && overlaps[static_cast<size_t>(i)].ok) {
+            // End at the seam (which defaults to usable_end when there
+            // is no dirty tail — same as the original code).
+            content_end = overlaps[static_cast<size_t>(i)].seam_in_prev;
+        } else {
+            content_end = usable_end;
+        }
+        if (content_end < content_begin) content_end = content_begin;
 
-        push_span(plan.parts, i, content_begin, usable_end);
+        push_span(plan.parts, i, content_begin, content_end);
     }
 
     // Bottom bar once, from the bar-reference image.
