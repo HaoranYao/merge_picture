@@ -1,4 +1,5 @@
 build/
 merge.jpg
+merge_*.jpg
 *.user
 .vs/

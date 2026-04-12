@@ -3,8 +3,8 @@
 // Usage: picmerge <input_dir>
 //
 // Reads every .jpg / .jpeg / .png file in <input_dir>, sorts them in natural
-// order (so 2.jpg < 10.jpg), and writes a stitched `merge.jpg` into the
-// same directory as the input images.
+// order (so 2.jpg < 10.jpg), and writes a stitched `merge_<timestamp>.jpg`
+// into the same directory as the input images.
 //
 // If <input_dir> contains subdirectories, each subdirectory is processed
 // independently in natural order. The top-level directory is also processed
@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -29,12 +30,24 @@ namespace fs = std::filesystem;
 namespace {
 
 constexpr int kJpegQuality = 90;
-constexpr const char* kOutputName = "merge.jpg";
+constexpr const char* kOutputPrefix = "merge_";
+
+std::string make_output_name() {
+    auto now = std::chrono::system_clock::now();
+    auto epoch = now.time_since_epoch();
+    auto secs = std::chrono::duration_cast<std::chrono::seconds>(epoch).count();
+    return std::string(kOutputPrefix) + std::to_string(secs) + ".jpg";
+}
 
 bool has_image_extension(const fs::path& p) {
     std::string ext = p.extension().string();
     for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return ext == ".jpg" || ext == ".jpeg" || ext == ".png";
+}
+
+bool is_merge_output(const fs::path& p) {
+    const std::string name = p.filename().string();
+    return name.rfind(kOutputPrefix, 0) == 0;  // starts with "merge_"
 }
 
 // Natural-order comparator: split filename into alternating digit / non-digit
@@ -75,19 +88,19 @@ int usage() {
     std::fprintf(stderr, "Usage: picmerge <input_dir>\n");
     std::fprintf(stderr,
                  "  Reads all .jpg/.jpeg/.png files in <input_dir>, sorts\n"
-                 "  them in natural order, and writes merge.jpg alongside\n"
-                 "  the input images. If <input_dir> contains subdirectories,\n"
-                 "  each subdirectory is merged independently.\n");
+                 "  them in natural order, and writes merge_<timestamp>.jpg\n"
+                 "  alongside the input images. If <input_dir> contains\n"
+                 "  subdirectories, each subdirectory is merged independently.\n");
     return 1;
 }
 
-// Merge all images in `dir` into `dir/merge.jpg`.
+// Merge all images in `dir` into `dir/merge_<timestamp>.jpg`.
 // Returns true on success, false on any error (message already printed).
 bool merge_directory(const fs::path& dir) {
     using namespace picmerge;
 
     const std::string dir_str  = dir.string();
-    const std::string out_path = (dir / kOutputName).string();
+    const std::string out_path = (dir / make_output_name()).string();
 
     // ---- 1. Enumerate + natural sort ----------------------------------------
     std::vector<std::string> paths;
@@ -100,9 +113,8 @@ bool merge_directory(const fs::path& dir) {
         }
         if (!entry.is_regular_file()) continue;
         if (!has_image_extension(entry.path())) continue;
-        // Skip the output file if it already exists in this directory.
-        std::error_code eq_ec;
-        if (fs::equivalent(entry.path(), fs::path(out_path), eq_ec) && !eq_ec) continue;
+        // Skip previous merge outputs in this directory.
+        if (is_merge_output(entry.path())) continue;
         paths.push_back(entry.path().string());
     }
     if (paths.empty()) return true;  // nothing to do — not an error
@@ -273,7 +285,6 @@ int main(int argc, char** argv) {
     // root itself contains any image files.
     std::vector<fs::path> subdirs;
     bool root_has_images = false;
-    const fs::path out_root = root / kOutputName;
 
     for (const auto& entry : fs::directory_iterator(root, ec)) {
         if (ec) {
@@ -284,8 +295,7 @@ int main(int argc, char** argv) {
         if (entry.is_directory()) {
             subdirs.push_back(entry.path());
         } else if (entry.is_regular_file() && has_image_extension(entry.path())) {
-            std::error_code eq_ec;
-            if (!fs::equivalent(entry.path(), out_root, eq_ec) || eq_ec)
+            if (!is_merge_output(entry.path()))
                 root_has_images = true;
         }
     }
