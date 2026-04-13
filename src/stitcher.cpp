@@ -103,9 +103,15 @@ StitchPlan plan_stitch(int width,
                 // strip the full UI chrome (status bar + nav bar + tab bar)
                 // even when the strict sticky detection found a smaller
                 // shared header (e.g. tab indicator colour changed).
-                const int prev_skip = fallback_skip[static_cast<size_t>(i - 1)];
-                const int curr_skip = fallback_skip[static_cast<size_t>(i)];
-                content_begin = top_bar + std::max(prev_skip, curr_skip);
+                //
+                // Key fix: when prev_skip < curr_skip, the prev image's
+                // rows in [prev_skip, curr_skip] may contain UI chrome that
+                // would conflict with next image's chrome. We must ensure
+                // both images skip the same amount. Use max() for both.
+                const int unified_skip = std::max(
+                    fallback_skip[static_cast<size_t>(i - 1)],
+                    fallback_skip[static_cast<size_t>(i)]);
+                content_begin = top_bar + unified_skip;
             }
 
             // Clamp: never go backwards and never exceed usable_end.
@@ -119,6 +125,12 @@ StitchPlan plan_stitch(int width,
             // End at the seam (which defaults to usable_end when there
             // is no dirty tail — same as the original code).
             content_end = overlaps[static_cast<size_t>(i)].seam_in_prev;
+        } else if (i < num_images - 1) {
+            // No overlap detected → assume prev's tail and next's UI chrome
+            // have similar height. Skip prev's tail to avoid visual conflict.
+            const int next_skip = fallback_skip[static_cast<size_t>(i + 1)];
+            content_end = usable_end - next_skip;
+            if (content_end < content_begin) content_end = content_begin;
         } else {
             content_end = usable_end;
         }
