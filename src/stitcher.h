@@ -37,6 +37,10 @@ struct StitchPlan {
 // Pure planning: given metadata, decide who contributes what rows.
 // `self_sticky[i]` is the sticky-header height of image i in its own
 // coordinate system (already merged from the pairwise detection).
+// `fallback_skip[i]` is the number of top rows to skip from image i when
+// overlap detection fails. Computed with a lenient threshold so it covers
+// the full UI chrome (status bar + nav bar + tab bar) even when tab
+// indicators differ between images.
 // `overlaps[i]` is the overlap result for pair (i, i+1); only i in
 // [0, N-2] is populated.
 // `bar_ref_image` is the image index whose bar rows should be used for
@@ -49,6 +53,7 @@ StitchPlan plan_stitch(int width,
                        int bottom_bar,
                        int bar_ref_image,
                        const std::vector<int>& self_sticky,
+                       const std::vector<int>& fallback_skip,
                        const std::vector<OverlapResult>& overlaps);
 
 // Execute a plan: load each image in turn, memcpy its contribution rows,

@@ -39,6 +39,7 @@ StitchPlan plan_stitch(int width,
                        int bottom_bar,
                        int bar_ref_image,
                        const std::vector<int>& self_sticky,
+                       const std::vector<int>& fallback_skip,
                        const std::vector<OverlapResult>& overlaps) {
     StitchPlan plan;
     plan.width = width;
@@ -97,7 +98,14 @@ StitchPlan plan_stitch(int width,
                 const int seam_offset = prev_ov.seam_in_prev - prev_ov.offset_in_prev;
                 content_begin = prev_ov.template_start_in_next + seam_offset;
             } else {
-                content_begin = top_bar + std::max(curr_sticky, prev_sticky);
+                // Degraded path: no reliable overlap → direct concat.
+                // Use fallback_skip (lenient chrome height) to ensure we
+                // strip the full UI chrome (status bar + nav bar + tab bar)
+                // even when the strict sticky detection found a smaller
+                // shared header (e.g. tab indicator colour changed).
+                const int prev_skip = fallback_skip[static_cast<size_t>(i - 1)];
+                const int curr_skip = fallback_skip[static_cast<size_t>(i)];
+                content_begin = top_bar + std::max(prev_skip, curr_skip);
             }
 
             // Clamp: never go backwards and never exceed usable_end.

@@ -244,6 +244,35 @@ bool merge_directory(const fs::path& dir) {
         }
     }
 
+    // ---- 6b. Lenient chrome height for fallback skip -------------------------
+    // The strict sticky detection (per-bin tol=4) may undercount the UI chrome
+    // when adjacent images have different tab selections (the tab indicator
+    // colour causes a per-bin diff > 4, but the L1 sum is still small).
+    // Compute a lenient per-pair chrome height using the bar-level L1 threshold
+    // so the degraded (no-overlap) path strips the full top chrome.
+    constexpr int kChromeLenientL1 = 300;
+    std::vector<int> chrome_pair(paths.size(), 0);
+    for (size_t k = 1; k < paths.size(); ++k) {
+        int s = 0;
+        while (s < max_sticky) {
+            const int y = bars.top_height + s;
+            if (row_l1(sigs[k - 1].row(y), sigs[k].row(y)) > kChromeLenientL1)
+                break;
+            ++s;
+        }
+        chrome_pair[k] = s;
+    }
+
+    // Per-image fallback skip: max of strict sticky and lenient chrome
+    // across all adjacent pairs.
+    std::vector<int> fallback_skip(paths.size(), 0);
+    for (size_t k = 0; k < paths.size(); ++k) {
+        int c = self_sticky[k];
+        if (k >= 1)               c = std::max(c, chrome_pair[k]);
+        if (k + 1 < paths.size()) c = std::max(c, chrome_pair[k + 1]);
+        fallback_skip[k] = c;
+    }
+
     sigs.clear();
     sigs.shrink_to_fit();
 
@@ -257,7 +286,7 @@ bool merge_directory(const fs::path& dir) {
                                         static_cast<int>(paths.size()),
                                         bars.top_height, bars.bottom_height,
                                         bar_ref,
-                                        self_sticky, overlaps);
+                                        self_sticky, fallback_skip, overlaps);
     std::fprintf(stdout, "[info] output dimensions: %dx%d, %zu span(s)\n",
                  plan.width, plan.height, plan.parts.size());
 
