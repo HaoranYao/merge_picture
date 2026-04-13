@@ -3,3 +3,5 @@ merge.jpg
 merge_*.jpg
 *.user
 .vs/
+build_vs/
+settings.local.json
