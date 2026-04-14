@@ -161,6 +161,13 @@ void refine_overlap_seam(const RowSignatures& prev,
     // Scan upward to find where the clean zone begins.  Require a run of
     // kMinClean consecutive clean rows to be robust against noise.
     constexpr int kMinClean = 3;
+    // Safety margin above the detected dirty region.  Floating UI
+    // elements often have a gradient / shadow at their top edge whose
+    // per-row L1 falls below kDirtyL1.  Trimming a few extra clean
+    // rows eliminates these semi-dirty transition rows; since the
+    // trimmed rows are clean (prev ≈ next), replacing them with next's
+    // pixels is visually identical.
+    constexpr int kSeamMargin = 10;
     int clean_run = 0;
 
     for (int y = ov_end - 1; y >= ov_begin; --y) {
@@ -170,8 +177,11 @@ void refine_overlap_seam(const RowSignatures& prev,
         if (l1 <= kDirtyL1) {
             ++clean_run;
             if (clean_run >= kMinClean) {
-                // Place seam right after this stable clean zone.
-                result.seam_in_prev = y + clean_run;
+                // Place seam right after this stable clean zone,
+                // then pull it up by the safety margin.
+                int seam = y + clean_run;
+                seam = std::max(ov_begin, seam - kSeamMargin);
+                result.seam_in_prev = seam;
                 return;
             }
         } else {

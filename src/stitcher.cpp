@@ -84,7 +84,13 @@ StitchPlan plan_stitch(int width,
             // ghost status bar into the middle of the output.
             const int prev_sticky = self_sticky[static_cast<size_t>(i - 1)];
             const int curr_sticky = self_sticky[static_cast<size_t>(i)];
-            if (top_bar > 0 && curr_sticky > prev_sticky) {
+            // Only inject sticky header when the overlap with the
+            // previous image FAILED.  When overlap succeeds, the content
+            // transition is already handled by the overlap mapping — the
+            // sticky header rows are scroll-content that already appeared
+            // in an earlier image's contribution.  Injecting them again
+            // creates a visible duplicate bar artifact.
+            if (top_bar > 0 && curr_sticky > prev_sticky && !prev_ov.ok) {
                 push_span(plan.parts, i,
                           top_bar + prev_sticky,
                           top_bar + curr_sticky);
