@@ -345,6 +345,7 @@ void test_demo_datasets() {
     double retention_sum = 0.0;
     double retention_min = 1.0;
     int worst_duplicate_rows = 0;
+    int pdd3_bottom_bar = 0;
 
     for (const auto& dir : dirs) {
         const DatasetMetrics m = analyze_dataset(dir);
@@ -355,6 +356,7 @@ void test_demo_datasets() {
         retention_sum += m.sample_retention;
         retention_min = std::min(retention_min, m.sample_retention);
         worst_duplicate_rows = std::max(worst_duplicate_rows, m.max_duplicate_rows);
+        if (m.name == "pdd3") pdd3_bottom_bar = m.bottom_bar;
 
         std::cout << "[dataset] " << m.name
                   << " images=" << m.num_images
@@ -394,6 +396,7 @@ void test_demo_datasets() {
     expect(avg_retention >= 0.98, "average retention is too low");
     expect(retention_min >= 0.95, "minimum retention is too low");
     expect(worst_duplicate_rows <= 64, "worst duplicate leakage is too large");
+    expect(pdd3_bottom_bar >= 240, "pdd3 bottom bar regression: CTA strip was under-detected");
 }
 
 } // namespace

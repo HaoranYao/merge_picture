@@ -61,4 +61,19 @@ inline int row_l1(const uint8_t* a, const uint8_t* b) {
     return s;
 }
 
+// L1 on the outer bins only. Used by bottom-bar detection to tolerate
+// dynamic center text while still matching stable left/right chrome.
+inline int row_edge_l1(const uint8_t* a, const uint8_t* b) {
+    int s = 0;
+    for (int k = 0; k < 4; ++k) {
+        int d = static_cast<int>(a[k]) - static_cast<int>(b[k]);
+        s += (d < 0) ? -d : d;
+    }
+    for (int k = kSigBins - 4; k < kSigBins; ++k) {
+        int d = static_cast<int>(a[k]) - static_cast<int>(b[k]);
+        s += (d < 0) ? -d : d;
+    }
+    return s;
+}
+
 } // namespace picmerge

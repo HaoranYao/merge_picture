@@ -25,6 +25,7 @@ namespace {
 // and gradient-background rendering differences (e.g. PDD's red gradient
 // action bar produces pairwise L1 of 200-400 across screenshots).
 constexpr int kBarL1Thresh = 300;  // sum of |a[k]-b[k]| across 16 bins
+constexpr int kBarEdgeL1Thresh = 80;  // sum of |a[k]-b[k]| on outer 8 bins
 
 // Check whether row `y` qualifies as a fixed-bar row using majority voting.
 //
@@ -33,17 +34,23 @@ constexpr int kBarL1Thresh = 300;  // sum of |a[k]-b[k]| across 16 bins
 // (e.g. a floating popup, dismissible banner, or live-streaming badge)
 // covers part of the bar in a minority of screenshots.
 //
-// Returns true if there exists a reference image such that at least
-// (N - max_outliers) images (including the reference) agree with it.
+// Bottom CTA bars often contain dynamic center text or avatars while their
+// left/right chrome stays fixed. When `allow_dynamic_center` is enabled, treat
+// a row as matching if either the full-row L1 or the outer-bin L1 is small.
 bool row_is_bar(const std::vector<RowSignatures>& sigs, int y,
-                int max_outliers) {
+                int max_outliers,
+                bool allow_dynamic_center) {
     const int N = static_cast<int>(sigs.size());
     for (int ref = 0; ref < N; ++ref) {
         int disagree = 0;
         const uint8_t* rrow = sigs[static_cast<size_t>(ref)].row(y);
         for (int i = 0; i < N; ++i) {
             if (i == ref) continue;
-            if (row_l1(rrow, sigs[static_cast<size_t>(i)].row(y)) > kBarL1Thresh) {
+            const uint8_t* row = sigs[static_cast<size_t>(i)].row(y);
+            const bool full_match = row_l1(rrow, row) <= kBarL1Thresh;
+            const bool edge_match =
+                allow_dynamic_center && row_edge_l1(rrow, row) <= kBarEdgeL1Thresh;
+            if (!full_match && !edge_match) {
                 ++disagree;
                 if (disagree > max_outliers) break;
             }
@@ -51,6 +58,13 @@ bool row_is_bar(const std::vector<RowSignatures>& sigs, int y,
         if (disagree <= max_outliers) return true;
     }
     return false;
+}
+
+// Returns true if there exists a reference image such that at least
+// (N - max_outliers) images (including the reference) agree with it.
+bool row_is_bar(const std::vector<RowSignatures>& sigs, int y,
+                int max_outliers) {
+    return row_is_bar(sigs, y, max_outliers, /*allow_dynamic_center=*/false);
 }
 
 // Find the image whose bar rows best represent the majority.
@@ -117,7 +131,8 @@ FixedBars detect_fixed_bars(const std::vector<RowSignatures>& sigs,
     while (bot < cap) {
         const int y = H - 1 - bot;
         if (y < top) break;
-        if (!row_is_bar(sigs, y, max_outliers)) break;
+        if (!row_is_bar(sigs, y, max_outliers, /*allow_dynamic_center=*/true))
+            break;
         ++bot;
     }
 
