@@ -114,10 +114,18 @@ StitchPlan plan_stitch(int width,
                 // rows in [prev_skip, curr_skip] may contain UI chrome that
                 // would conflict with next image's chrome. We must ensure
                 // both images skip the same amount. Use max() for both.
-                const int unified_skip = std::max(
-                    fallback_skip[static_cast<size_t>(i - 1)],
-                    fallback_skip[static_cast<size_t>(i)]);
-                content_begin = top_bar + unified_skip;
+                //
+                // HOWEVER: for the LAST image, there's no "next image" to
+                // conflict with, so we don't need to skip its top rows based
+                // on fallback_skip. Just skip the sticky header.
+                if (i == num_images - 1) {
+                    content_begin = top_bar + curr_sticky;
+                } else {
+                    const int unified_skip = std::max(
+                        fallback_skip[static_cast<size_t>(i - 1)],
+                        fallback_skip[static_cast<size_t>(i)]);
+                    content_begin = top_bar + unified_skip;
+                }
             }
 
             // Clamp: never go backwards and never exceed usable_end.
@@ -134,8 +142,18 @@ StitchPlan plan_stitch(int width,
         } else if (i < num_images - 1) {
             // No overlap detected → assume prev's tail and next's UI chrome
             // have similar height. Skip prev's tail to avoid visual conflict.
-            const int next_skip = fallback_skip[static_cast<size_t>(i + 1)];
-            content_end = usable_end - next_skip;
+            //
+            // EXCEPTION: when the next image is the LAST one, we should NOT
+            // skip prev's tail. The last image will start from its sticky
+            // header (not from fallback_skip), so there's no chrome conflict.
+            // Skipping prev's tail would create a content gap.
+            if (i + 1 == num_images - 1) {
+                // Next image is the last one: don't skip prev's tail.
+                content_end = usable_end;
+            } else {
+                const int next_skip = fallback_skip[static_cast<size_t>(i + 1)];
+                content_end = usable_end - next_skip;
+            }
             if (content_end < content_begin) content_end = content_begin;
         } else {
             content_end = usable_end;
