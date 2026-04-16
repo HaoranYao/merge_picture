@@ -49,6 +49,7 @@ OverlapResult match_at(const RowSignatures& prev,
         for (int k = 0; k < L; ++k) {
             cost += row_l1(prow + static_cast<size_t>(k) * kSigBins,
                            tmpl + static_cast<size_t>(k) * kSigBins);
+            if (cost >= best_cost) break;  // partial sum is a lower bound; can't improve
         }
         if (cost < best_cost) {
             if (best_d < 0 || std::abs(d - best_d) > L / 2) {
