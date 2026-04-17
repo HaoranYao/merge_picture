@@ -78,6 +78,14 @@ std::vector<std::string> collect_demo_dirs(const fs::path& demo_root) {
     return dirs;
 }
 
+void write_raw_file(const fs::path& path, const std::vector<uint8_t>& bytes) {
+    std::FILE* file = std::fopen(path.string().c_str(), "wb");
+    expect(file != nullptr, "failed to open raw file: " + path.string());
+    const size_t written = std::fwrite(bytes.data(), 1, bytes.size(), file);
+    std::fclose(file);
+    expect(written == bytes.size(), "failed to write raw file: " + path.string());
+}
+
 struct DatasetMetrics {
     std::string name;
     int num_images = 0;
@@ -333,6 +341,72 @@ void test_plan_stitch_avoids_overlap_duplication() {
            "second image span mismatch");
 }
 
+void test_execute_stitch_from_raw_cache() {
+    const int width = 64;
+    const int height = 8;
+    std::vector<uint8_t> img0(static_cast<size_t>(width) * height * picmerge::kChannels, 0);
+    std::vector<uint8_t> img1(static_cast<size_t>(width) * height * picmerge::kChannels, 0);
+
+    auto fill_rows = [width](std::vector<uint8_t>& img, int y_begin, int y_end, uint8_t value) {
+        for (int y = y_begin; y < y_end; ++y) {
+            uint8_t* row = img.data() +
+                static_cast<size_t>(y) * width * picmerge::kChannels;
+            for (int x = 0; x < width; ++x) {
+                row[x * picmerge::kChannels + 0] = value;
+                row[x * picmerge::kChannels + 1] = value;
+                row[x * picmerge::kChannels + 2] = value;
+            }
+        }
+    };
+
+    fill_rows(img0, 0, 4, 32);
+    fill_rows(img0, 4, 8, 96);
+    fill_rows(img1, 0, 2, 96);
+    fill_rows(img1, 2, 8, 160);
+
+    const fs::path temp_root = fs::temp_directory_path() / "picmerge_tests";
+    fs::create_directories(temp_root);
+    const fs::path raw0 = temp_root / "raw0.rgb";
+    const fs::path raw1 = temp_root / "raw1.rgb";
+    const fs::path out_path = temp_root / "raw_cache_stitched.jpg";
+    write_raw_file(raw0, img0);
+    write_raw_file(raw1, img1);
+
+    picmerge::StitchPlan plan;
+    plan.width = width;
+    plan.height = 10;
+    plan.parts.push_back({0, 0, 4});
+    plan.parts.push_back({1, 2, 8});
+
+    expect(picmerge::execute_stitch_from_raw_cache(
+               plan,
+               {raw0.string(), raw1.string()},
+               out_path.string(),
+               90),
+           "raw-cache stitch execution failed");
+
+    picmerge::Image out_img;
+    expect(out_img.load(out_path.string()), "failed to load raw-cache output");
+    expect(out_img.width() == width && out_img.height() == plan.height,
+           "raw-cache output dimensions mismatch");
+
+    const picmerge::RowSignatures out_sigs = picmerge::compute_row_signatures(out_img);
+    expect(out_sigs.height == plan.height, "raw-cache output signatures missing");
+    for (int y = 0; y < 4; ++y) {
+        expect(picmerge::row_l1(out_sigs.row(y), out_sigs.row(0)) <= 32,
+               "first raw-cache span changed unexpectedly");
+    }
+    for (int y = 4; y < plan.height; ++y) {
+        expect(picmerge::row_l1(out_sigs.row(y), out_sigs.row(4)) <= 32,
+               "second raw-cache span changed unexpectedly");
+    }
+
+    std::error_code ec;
+    fs::remove(raw0, ec);
+    fs::remove(raw1, ec);
+    fs::remove(out_path, ec);
+}
+
 void test_demo_datasets() {
     const fs::path demo_root = fs::path(PICMERGE_SOURCE_DIR) / "demo_pic";
     const std::vector<std::string> dirs = collect_demo_dirs(demo_root);
@@ -407,6 +481,7 @@ int main() {
         test_overlap_finder_with_dynamic_header();
         test_refine_overlap_seam_trims_dirty_tail();
         test_plan_stitch_avoids_overlap_duplication();
+        test_execute_stitch_from_raw_cache();
         test_demo_datasets();
     } catch (const TestFailure& ex) {
         std::cerr << "[FAIL] " << ex.what() << "\n";

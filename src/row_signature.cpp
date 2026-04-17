@@ -2,7 +2,43 @@
 
 #include "row_signature.h"
 
+#include <cstdint>
+
 namespace picmerge {
+
+namespace {
+
+inline unsigned fast_divide(unsigned sum, unsigned divisor, uint64_t recip) {
+    unsigned q = static_cast<unsigned>((static_cast<uint64_t>(sum) * recip) >> 32);
+    if (static_cast<uint64_t>(q) * divisor > sum) {
+        --q;
+    } else if (static_cast<uint64_t>(q + 1) * divisor <= sum) {
+        ++q;
+    }
+    return q;
+}
+
+inline unsigned sum_bytes(const uint8_t* p, int count) {
+    unsigned sum = 0;
+    int i = 0;
+
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    for (; i + 16 <= count; i += 16) {
+        sum += static_cast<unsigned>(detail::horizontal_sum_u8(vld1q_u8(p + i)));
+    }
+#elif defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
+    const __m128i zero = _mm_setzero_si128();
+    for (; i + 16 <= count; i += 16) {
+        const __m128i bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(p + i));
+        sum += static_cast<unsigned>(detail::sad_sum(_mm_sad_epu8(bytes, zero)));
+    }
+#endif
+
+    for (; i < count; ++i) sum += p[i];
+    return sum;
+}
+
+} // namespace
 
 RowSignatures compute_row_signatures(const Image& img) {
     RowSignatures out;
@@ -20,6 +56,8 @@ RowSignatures compute_row_signatures(const Image& img) {
 
     const int bin_pixels = slice_pixels / kSigBins;
     const int bin_bytes  = bin_pixels * kChannels;
+    const unsigned bin_divisor = static_cast<unsigned>(bin_bytes);
+    const uint64_t bin_recip = (((uint64_t)1 << 32) + bin_divisor - 1) / bin_divisor;
 
     const size_t row_stride = static_cast<size_t>(W) * kChannels;
     const size_t col_offset = static_cast<size_t>(x_begin) * kChannels;
@@ -33,9 +71,8 @@ RowSignatures compute_row_signatures(const Image& img) {
 
         for (int b = 0; b < kSigBins; ++b) {
             const uint8_t* p = rowp + static_cast<size_t>(b) * bin_bytes;
-            unsigned sum = 0;
-            for (int k = 0; k < bin_bytes; ++k) sum += p[k];
-            fp[b] = static_cast<uint8_t>(sum / static_cast<unsigned>(bin_bytes));
+            const unsigned sum = sum_bytes(p, bin_bytes);
+            fp[b] = static_cast<uint8_t>(fast_divide(sum, bin_divisor, bin_recip));
         }
     }
     return out;

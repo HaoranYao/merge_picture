@@ -10,13 +10,28 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 include(CTest)
+include(CheckIPOSupported)
+
+check_ipo_supported(RESULT PICMERGE_IPO_SUPPORTED OUTPUT PICMERGE_IPO_ERROR)
+if(PICMERGE_IPO_SUPPORTED)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+endif()
 
 if(MSVC)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
     add_compile_options(/W3 /permissive- /utf-8)
-    add_compile_options($<$<CONFIG:Release>:/O2>)
+    add_compile_options($<$<CONFIG:Release>:/O2> $<$<CONFIG:Release>:/GL>)
+    add_link_options($<$<CONFIG:Release>:/LTCG>)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
-    add_compile_options($<$<CONFIG:Release>:-O2>)
+    add_compile_options(
+        $<$<CONFIG:Release>:-O3>
+        $<$<CONFIG:Release>:-fno-math-errno>
+        $<$<CONFIG:Release>:-fno-trapping-math>
+    )
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+        add_compile_options($<$<CONFIG:Release>:-march=armv8-a+simd>)
+    endif()
 endif()
 
 add_library(picmerge_lib

@@ -2,12 +2,6 @@
 //
 // Takes the planning results (fixed bars, per-image sticky header heights,
 // per-pair overlap offsets) and produces the final long image.
-//
-// Memory policy:
-//   - Exactly one pre-allocated output buffer (W × H_out × 3 bytes).
-//   - At any moment, at most ONE decoded input image is held in memory.
-//   - Each input image is loaded, its contribution rows memcpy'd into the
-//     output buffer, then freed immediately.
 
 #pragma once
 
@@ -19,33 +13,20 @@
 
 namespace picmerge {
 
-// One contiguous row span that an image contributes to the final output.
 struct Contribution {
-    int image_index;   // index into input_paths
-    int y_begin;       // inclusive, source-image coordinates
-    int y_end;         // exclusive
+    int image_index;
+    int y_begin;
+    int y_end;
 };
 
 struct StitchPlan {
-    int width  = 0;
-    int height = 0;     // total output height
+    int width = 0;
+    int height = 0;
     int top_bar = 0;
     int bottom_bar = 0;
-    std::vector<Contribution> parts;  // in output-row order
+    std::vector<Contribution> parts;
 };
 
-// Pure planning: given metadata, decide who contributes what rows.
-// `self_sticky[i]` is the sticky-header height of image i in its own
-// coordinate system (already merged from the pairwise detection).
-// `fallback_skip[i]` is the number of top rows to skip from image i when
-// overlap detection fails. Computed with a lenient threshold so it covers
-// the full UI chrome (status bar + nav bar + tab bar) even when tab
-// indicators differ between images.
-// `overlaps[i]` is the overlap result for pair (i, i+1); only i in
-// [0, N-2] is populated.
-// `bar_ref_image` is the image index whose bar rows should be used for
-// the single top/bottom bar contribution in the output. Normally 0, but
-// may differ when some images have temporary overlays on the bar area.
 StitchPlan plan_stitch(int width,
                        int image_height,
                        int num_images,
@@ -56,11 +37,14 @@ StitchPlan plan_stitch(int width,
                        const std::vector<int>& fallback_skip,
                        const std::vector<OverlapResult>& overlaps);
 
-// Execute a plan: load each image in turn, memcpy its contribution rows,
-// encode the output as JPEG. Returns false on any I/O or alloc failure.
 bool execute_stitch(const StitchPlan& plan,
                     const std::vector<std::string>& input_paths,
                     const std::string& output_path,
                     int jpeg_quality);
+
+bool execute_stitch_from_raw_cache(const StitchPlan& plan,
+                                   const std::vector<std::string>& raw_cache_paths,
+                                   const std::string& output_path,
+                                   int jpeg_quality);
 
 } // namespace picmerge
